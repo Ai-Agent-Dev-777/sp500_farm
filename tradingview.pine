@@ -1,0 +1,46 @@
+//@version=5
+indicator("S&P 500 Trading Farm Webhook", overlay=true)
+
+// НАЛАШТУВАННЯ
+webhook_url = input.string(defval="https://YOUR-RAILWAY-URL/webhook", title="Webhook URL", group="Configuration")
+send_interval = input.int(defval=5, title="Send Interval (minutes)", minval=1, group="Configuration")
+
+// ATR розрахунок
+atr_period = input.int(defval=14, title="ATR Period", minval=1, group="ATR")
+atr_value = ta.atr(atr_period)
+
+// Вибір свічки для відправки
+var last_send_time = time(timeframe.period)
+var send_enabled = false
+
+// Логіка відправки кожні N хвилин
+if barstate.isclose
+    time_diff = (time - last_send_time) / 60000  // Convert to minutes
+    
+    if time_diff >= send_interval
+        send_enabled := true
+        last_send_time := time
+    else
+        send_enabled := false
+
+// Підготуй дані для вебхуку
+price = close
+high_price = high
+low_price = low
+volume_val = volume
+
+// JSON повідомлення
+json_message = '{"price": ' + str.tostring(price, "#.00") + ', "high": ' + str.tostring(high_price, "#.00") + ', "low": ' + str.tostring(low_price, "#.00") + ', "volume": ' + str.tostring(volume_val, "#") + ', "atr": ' + str.tostring(atr_value, "#.00") + '}'
+
+// Відправь вебхук
+if send_enabled
+    request.post(url=webhook_url, headers={"Content-Type": "application/json"}, body=json_message)
+
+// Візуалізація на графіку
+plot(atr_value, title="ATR", color=color.blue, linewidth=1)
+plot(high_price, title="High", color=color.green, linewidth=1, display=display.none)
+plot(low_price, title="Low", color=color.red, linewidth=1, display=display.none)
+
+// Лейбл статусу
+if send_enabled
+    label.new(bar_index, high_price + atr_value, "📡 Signal Sent", color=color.blue, textcolor=color.white, style=label.style_label_down)
