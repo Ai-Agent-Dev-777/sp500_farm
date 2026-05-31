@@ -1,14 +1,18 @@
 import anthropic
 import json
 import time
+import os
 from datetime import datetime
+from dotenv import load_dotenv
 
-# Ініціалізація Claude
-client = anthropic.Anthropic()
+load_dotenv()
+
+# Ініціалізація Claude з API ключем з .env
+api_key = os.getenv("ANTHROPIC_API_KEY")
+client = anthropic.Anthropic(api_key=api_key)
 
 MODEL = "claude-haiku-4-5-20251001"
 
-# SYSTEM промпт - дуже великий, кешуватиметься
 SYSTEM = """You are an expert S&P 500 trading analyst system. Analyze market data using technical analysis.
 
 Your role: Given real market data (price, high, low, volume, ATR), provide trading signals.
@@ -36,17 +40,11 @@ RESPONSE FORMAT (always JSON):
 
 If no clear signal, return WAIT with reasoning."""
 
-# Кешуємо SYSTEM промпт
 SYSTEM_CACHED = [
     {"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral"}}
 ]
 
-
 def ask_claude(prompt, max_tokens=800, max_retries=5):
-    """
-    Єдина функція для всіх запитів до Claude.
-    Вбудовано: prompt caching, retry при 429, обрізання тексту.
-    """
     for attempt in range(max_retries):
         try:
             response = client.messages.create(
@@ -58,7 +56,7 @@ def ask_claude(prompt, max_tokens=800, max_retries=5):
             text = response.content[0].text
             return text.strip()
         except anthropic.RateLimitError:
-            wait = 2 ** attempt  # 1, 2, 4, 8, 16 сек
+            wait = 2 ** attempt
             print(f"⏳ Rate limit. Waiting {wait}s...")
             time.sleep(wait)
         except anthropic.APIError as e:
@@ -66,21 +64,9 @@ def ask_claude(prompt, max_tokens=800, max_retries=5):
             return None
     return None
 
-
 class MarketAnalyzer:
-    """Agent 1: Аналізує ринкові дані"""
-    
     @staticmethod
     def analyze(market_data):
-        """
-        market_data = {
-            'price': 5500,
-            'high': 5510,
-            'low': 5480,
-            'volume': 1000000,
-            'atr': 45
-        }
-        """
         prompt = f"""Analyze this S&P 500 market data:
 - Current Price: {market_data['price']}
 - High: {market_data['high']}
@@ -100,13 +86,9 @@ Be concise."""
         result = ask_claude(prompt, max_tokens=500)
         return {"analysis": result, "timestamp": datetime.now().isoformat()}
 
-
 class SignalGenerator:
-    """Agent 2: Генерує торгові сигнали на основі аналізу"""
-    
     @staticmethod
     def generate_signal(market_data, analysis):
-        """Генерує BUY/SELL/WAIT сигнал"""
         prompt = f"""Based on this market data and analysis:
 
 MARKET DATA:
@@ -123,7 +105,6 @@ Generate a trading signal. Response MUST be valid JSON only, no other text."""
         result = ask_claude(prompt, max_tokens=400)
         
         try:
-            # Спробуй распарсити JSON
             signal_data = json.loads(result)
             signal_data["timestamp"] = datetime.now().isoformat()
             return signal_data
@@ -134,14 +115,9 @@ Generate a trading signal. Response MUST be valid JSON only, no other text."""
                 "timestamp": datetime.now().isoformat()
             }
 
-
 class RiskManager:
-    """Agent 3: Перевіряє ризик позиції"""
-    
     @staticmethod
     def check_risk(signal, account_balance=10000):
-        """Перевіряє чи позиція безпечна"""
-        
         if signal.get("signal") == "WAIT":
             return {
                 "approved": True,
@@ -149,17 +125,14 @@ class RiskManager:
                 "risk_check": "N/A"
             }
         
-        # Макс ризик на день - 1% від балансу
         max_daily_risk = account_balance * 0.01
-        
-        # Ризик цієї позиції
         entry = signal.get("entry_price", 0)
         stop_loss = signal.get("stop_loss", 0)
         
         if entry == 0 or stop_loss == 0:
             return {"approved": False, "message": "Invalid entry or stop-loss"}
         
-        risk_per_contract = abs(entry - stop_loss) * 100  # S&P 500 = $100 per point
+        risk_per_contract = abs(entry - stop_loss) * 100
         position_size = signal.get("position_size", 1)
         total_risk = risk_per_contract * position_size
         
@@ -173,13 +146,9 @@ class RiskManager:
             "timestamp": datetime.now().isoformat()
         }
 
-
 class TradingLogger:
-    """Agent 4: Логує всі торговельні дані"""
-    
     @staticmethod
     def log_trade(market_data, analysis, signal, risk_check):
-        """Логує всю інформацію про торговлю"""
         log_entry = {
             "timestamp": datetime.now().isoformat(),
             "market": {
@@ -203,10 +172,7 @@ class TradingLogger:
         }
         return log_entry
 
-
 class TradingFarm:
-    """Ферма агентів - 4 агенти працюють разом"""
-    
     def __init__(self):
         self.analyzer = MarketAnalyzer()
         self.signal_gen = SignalGenerator()
@@ -214,32 +180,17 @@ class TradingFarm:
         self.logger = TradingLogger()
     
     def process_market_data(self, market_data, account_balance=10000):
-        """
-        Обробляє ринкові дані через всіх 4 агентів.
-        
-        market_data = {
-            'price': 5500,
-            'high': 5510,
-            'low': 5480,
-            'volume': 1000000,
-            'atr': 45
-        }
-        """
         print(f"\n🚀 Processing S&P 500 at price {market_data['price']}...")
         
-        # Agent 1: Analyze
         print("📊 Agent 1: Analyzing market...")
         analysis_result = self.analyzer.analyze(market_data)
         
-        # Agent 2: Generate Signal
         print("📈 Agent 2: Generating signal...")
         signal = self.signal_gen.generate_signal(market_data, analysis_result["analysis"])
         
-        # Agent 3: Check Risk
         print("⚠️ Agent 3: Checking risk...")
         risk_check = self.risk_mgr.check_risk(signal, account_balance)
         
-        # Agent 4: Log
         print("📝 Agent 4: Logging...")
         log_entry = self.logger.log_trade(market_data, analysis_result["analysis"], signal, risk_check)
         
@@ -251,10 +202,7 @@ class TradingFarm:
             "log": log_entry
         }
 
-
-# Тестування локально
 if __name__ == "__main__":
-    # Тестові дані S&P 500
     test_data = {
         "price": 5500,
         "high": 5510,
