@@ -1,6 +1,9 @@
 from flask import Flask, jsonify, request
 import os
+from dotenv import load_dotenv
 from claude_farm import TradingFarm
+
+load_dotenv()
 
 app = Flask(__name__)
 farm = TradingFarm()
